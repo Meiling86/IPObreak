@@ -1,0 +1,113 @@
+# SVM
+import numpy as np
+from math import sqrt
+from sklearn.svm import SVR   #SVM的回归形式
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+#给出时间序列的GridSearchCV结合TimeSeriesSplit的调参
+def train(x_train, y_train):
+    my_cv = TimeSeriesSplit(n_splits= ).split(x_train)
+    cv_params = {'kernel':['linear','rbf','sigmoid'],'C':[...],'gamma':[...],'degree':[...]}
+    model = SVR()
+    optimized_GBM = GridSearchCV(estimator=model, param_grid=cv_params, scoring='r2', cv=my_cv)
+    optimized_GBM.fit(np.array(x_train), np.array(y_train))
+    model = optimized_GBM.best_estimator_
+    print('参数的最佳取值：{0}'.format(optimized_GBM.best_params_))
+    return model
+
+if __name__ == '__main__':
+    
+    X_train = 
+    X_test = 
+    y_train = 
+    y_test = 
+
+    model = train(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+# 计算MAE,MSE,RMSE,R-squared等指标
+print("SVM回归模型预测效果：")
+print("Mean_absolute_error:", mean_absolute_error(y_test, y_pred))
+print("Mean_squared_error:", mean_squared_error(y_test, y_pred))
+print("RMSE:", sqrt(mean_squared_error(y_test, y_pred)))
+print("R2 score:", r2_score(y_test, y_pred))
+
+
+# MLP
+import pandas as pd
+import numpy as np
+from math import sqrt
+from sklearn.neural_network import MLPRegressor
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+#给出时间序列的GridSearchCV结合TimeSeriesSplit的调参
+def train(x_train, y_train):
+    my_cv = TimeSeriesSplit(n_splits= ).split(x_train)
+    cv_params = {'learning_rate_init': [...], 'activation': ['identity','logistic', 'tanh', 'relu'], 'hidden_layer_sizes': [...]}
+    other_params = {'activation':'relu','hidden_layer_sizes':(...),'max_iter':    , 'solver':     , 'learning_rate_init':     }
+    model = MLPRegressor(**other_params)
+    optimized_GBM = GridSearchCV(estimator=model, param_grid=cv_params, scoring='r2', cv=my_cv)
+    optimized_GBM.fit(np.array(x_train), np.array(y_train))
+    model = optimized_GBM.best_estimator_
+    print('参数的最佳取值：{0}'.format(optimized_GBM.best_params_))
+    return model
+
+if __name__ == '__main__':
+    
+    X_train =
+    X_test = 
+    y_train = 
+    y_test = 
+
+    model = train(X_train, y_train)
+    y_pred = model.predict(X_test)
+    
+# 输出评估指标
+print("神经网络模型预测效果：")
+print("Mean_absolute_error:", mean_absolute_error(y_test, y_pred))
+print("Mean_squared_error:", mean_squared_error(y_test, y_pred))
+print("RMSE:", sqrt(mean_squared_error(y_test, y_pred)))
+print("R2 score:", r2_score(y_test, y_pred))
+
+
+# XBG
+#梯度提升回归树（XGB regression）
+import numpy as np
+from math import sqrt
+from xgboost import XGBRegressor   #XGBoost算法包
+from xgboost import plot_importance
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+#给出时间序列的GridSearchCV结合TimeSeriesSplit的调参
+def train(x_train, y_train):
+    my_cv = TimeSeriesSplit(n_splits= ).split(x_train)
+    cv_params = {'booster':[...], 'n_estimators': [...], 'learning_rate': [...], 'max_depth': [...],
+                 'min_child_weight': [...], 'gamma': [...], 'reg_alpha': [...]}
+    other_params = {'learning_rate':  , 'n_estimators':  , 'max_depth':  , 'min_child_weight':  , 'seed':  ,
+                    'subsample':  , 'colsample_bytree':  , 'gamma':  , 'reg_alpha':  , "lambda":  }
+    model = XGBRegressor(**other_params)
+    optimized_GBM = GridSearchCV(estimator=model, param_grid=cv_params, scoring='r2', cv=my_cv)
+    optimized_GBM.fit(np.array(x_train), np.array(y_train))
+    model = optimized_GBM.best_estimator_
+    print('参数的最佳取值：{0}'.format(optimized_GBM.best_params_))
+    return model
+
+if __name__ == '__main__':
+    
+    X_train = 
+    X_test = 
+    y_train = 
+    y_test = 
+
+    model = train(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+# 计算MAE,MSE,RMSE,R-squared等指标
+print("XGBoost回归模型预测效果：")
+print("Mean_absolute_error:", mean_absolute_error(y_test, y_pred))
+print("Mean_squared_error:", mean_squared_error(y_test, y_pred))
+print("RMSE:", sqrt(mean_squared_error(y_test, y_pred)))
+print("R2 score:", r2_score(y_test, y_pred))
