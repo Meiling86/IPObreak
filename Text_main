@@ -1,1 +1,271 @@
+# 1.招股说明书文本类型转换
+import os
+import pdfplumber as pb
+
+filenames = os.listdir(r"...\\data\\pdf")
+# convert pdf to txt
+for filename in filenames:
+    file_handle=open("...\\data\\txt\\"+filename[:-4]+".txt",mode='w',encoding='utf-8')
+    # 读取PDF文档
+    pdf = pb.open("...\\data\\pdf\\"+filename)
+    # 获取页数
+    a= len(pdf.pages)
+    for i in range(a):
+        first_page = pdf.pages[i]
+        # 导出当前页文本
+        text = first_page.extract_text()
+        print(text)
+        file_handle.write(text)
+
+
+# 2.文本文件预处理
+from string import punctuation
+import jieba, pickle, re, os
+from tqdm import tqdm
+
+with open("...\\data\\rt\\stopwords.txt", 'r', encoding='utf-8') as f:    
+    stopwords = [word.strip('\n') for word in f.readlines()]
+filenames = os.listdir(r"...\\data\\txt")
+
+punctuation = list("！？｡＂＃＄％＆＇（）＊＋，－／：；＜＝＞＠［＼］＾＿｀｛｜｝～｟｠｢｣､、〃》「」『』【】〔〕〖〗〘〙〚〛〜〝〞〟〰〾〿–—‘'‛“”„‟…‧﹏.")
+file_damage = []
+try:
+    #对招股说明书进行去除标点符号、去除停用词、删除空格处理
+    for filename in tqdm(filenames):
+        with open("...\\data\\txt\\"+filename, "r", encoding='utf-8') as f:  #打开文本
+            file = f.read()
+        words = jieba.lcut(file)
+        for m in range(len(words)):
+            words[m] = re.sub('[^\u4e00-\u9fa5]+', '', words[m])
+        j = 0 
+        for i in range(len(words)):
+            if words[j] == ' ' or words[j] == '' or words[j] in stopwords or words[j] in punctuation:
+                words.pop(j)
+            else:
+                j += 1
+
+        with open ("...\\data\\pickle\\"+filename[:6]+".txt", 'wb') as f:
+            pickle.dump(words, f) #用 dump 函数将 Python 对象转成二进制对象文件
+except:
+    file_damage.append(filename)
+
+
+# 3.每份文件tf-idf值的计算
+#得到每一份招股说明书对应的tfidf
+from gensim.models.tfidfmodel import TfidfModel
+from gensim import corpora
+import numpy as np
+import os, pickle
+from tqdm import tqdm
+
+filenames = os.listdir("...\\data\\pickle")
+data = []
+for filename in tqdm(filenames):
+    with open ("...\\data\\pickle\\"+filename, 'rb') as f:
+        words = pickle.load(f) 
+    data.append(words)
+dictionary = corpora.Dictionary(data)
+corpus = [dictionary.doc2bow(text) for text in data]
+tf_idf_model = TfidfModel(corpus, normalize=False)
+word_tf_idf = list(tf_idf_model[corpus])
+
+for i in tqdm(range(len(filenames))):
+    tfidf = {}
+    with open ("...\\data\\pickle\\"+filenames[i], 'rb') as f:
+        file = pickle.load(f) 
+    for j in file:
+        try:
+            tfidf[j] = word_tf_idf[i][dictionary.token2id[j]][1]
+        except:
+            tfidf[j] = 0
+
+    np.save('...\\data\\npy\\'+filenames[i]+".npy", tfidf)
+
+
+# 4.训练doc2vec模型
+import glob, os, spacy, psutil, jieba, multiprocessing
+import pandas as pd
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+from tqdm import tqdm
+from snownlp import SnowNLP
+import tensorflow as tf
+import numpy as np
+# Load filenames
+filenames = os.listdir("...\\data\\pickle")
+
+# 配置gpu训练
+#physical_devices = tf.config.experimental.list_physical_devices('GPU')
+#tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+# Load TF-IDF values from npy files
+tfidf_data = []
+for filename in tqdm(filenames):
+    tfidf_path = "...\\data\\npy\\" + filename + ".npy"
+    tfidf = np.load(tfidf_path, allow_pickle=True).item()
+    tfidf_sorted = sorted(tfidf.items(), key=lambda x: x[1], reverse=True)[:5000] # Keep top 5000 TF-IDF words
+    tfidf_words = [x[0] for x in tfidf_sorted]
+    tfidf_data.append(tfidf_words)
+
+# Train Doc2Vec model with TF-IDF words
+model = Doc2Vec(vector_size=300, window=10, min_count=1, workers=12, epochs=30)
+for i, tfidf_words in tqdm(enumerate(tqdm(tfidf_data))):
+    tagged_doc = TaggedDocument(words=tfidf_words, tags=[filenames[i]])
+    model.build_vocab([tagged_doc], update=i>0)
+    model.train([tagged_doc], total_examples=len(tfidf_words), epochs=model.epochs)
+
+model.save("doc2vec_model")
+
+
+# 5.计算文本相似度、文本情感、文本可读性
+import glob, os, spacy, psutil, re
+import pandas as pd
+from gensim.models.doc2vec import Doc2Vec
+from tqdm import tqdm
+from snownlp import SnowNLP
+import numpy as np
+import math
+import copy
+from multiprocessing import Manager, Pool
+from concurrent.futures import ThreadPoolExecutor
+
+dir_path = "...\\data"
+
+use_gpu = False
+use_multiprocess = False
+#multiprocess_core = os.cpu_count()
+
+if use_gpu:
+    if spacy.require_gpu():
+        spacy.prefer_gpu()
+        print("GPU 加速已启用")
+    else:
+        print("GPU 加速未启用")
+
+# 加载中文语言模型
+import spacy
+nlp = spacy.load("zh_core_web_sm")
+nlp.max_length = 4000000
+
+model_result1 = {}
+model_result2 = {}
+
+# 使用Doc2Vec模型计算文本相似度
+def doc2vec_similarity(text1, text2, similarity_cache):
+    # 将文本按照字典序排列，作为key存储文本相似度结果
+    key = tuple(sorted((text1, text2)))
+    if key in similarity_cache:
+        # 如果已经计算得到文本相似度，则直接从缓存中读取结果
+        return similarity_cache[key]
+    else:
+        vec1 = model_result1[text1]
+        vec2 = model_result2[text2]
+        vec1_norm = np.linalg.norm(vec1)
+        vec2_norm = np.linalg.norm(vec2)
+        similarity_score = np.dot(vec1, vec2) / (vec1_norm * vec2_norm)
+        # 将文本相似度结果存储到缓存中
+        similarity_cache[key] = similarity_score
+        return similarity_score
+
+def analyze_sentence(args):
+    sentence, word_tfidf = args
+    # 使用SnowNLP计算情感极性，并将结果映射到[0, 1]的范围
+    sentiment_score = SnowNLP(sentence).sentiments
+    # 计算句子的权重，这里直接使用每个词语的tfidf值相加作为句子权重
+    sentence_weight = sum(word_tfidf.get(word, 0) for word in sentence.split())
+    return sentiment_score, sentence_weight
+
+def text_score(text, word_tfidf):
+    # 对文本进行分句
+    args_list = [(sentence.strip(), word_tfidf) for sentence in re.split('[。！？]', text) if sentence.strip()]
+    # 使用线程池处理每个句子的情感极性和权重
+    with ThreadPoolExecutor() as executor:
+        results = list(executor.map(analyze_sentence, args_list))
+    sentiment_polarity, sentence_weights = zip(*results)
+    # 计算整个文本的情感极性和可读性
+    overall_polarity = sum(sentiment_polarity) / len(sentiment_polarity)
+    readability = math.exp(-1 * sum(sentence_weights) / len(args_list))
+    return overall_polarity, readability
+
+def run_token_nlp(args):
+    file, shared_dict, model = args
+    # print("current process {} deal file {}".format(os.getpid(), file))
+    with open(file, 'r', encoding='utf-8') as f:
+        text = f.read()
+    token_vec = [token.text for token in nlp(text)]
+    vec = model.infer_vector(token_vec)
+    shared_dict[file] = vec
+
+if __name__ == '__main__':
+    # 使用glob模块获取所有txt文件的文件名列表
+    txt_files = glob.glob(os.path.join(dir_path, "txt\\*.txt"))
+
+    model = Doc2Vec.load('doc2vec_model')
+
+    # 创建一个矩阵来存储相似度得分和文本可读性和情感分析得分
+    num_files = len(txt_files)
+    similarity_matrix = np.zeros((num_files, num_files))
+    readability_matrix = np.zeros((num_files,))
+    sentiment_matrix = np.zeros((num_files,))
+    mean_similarity_matrix = np.zeros((num_files,))
+
+    # 对于每个txt文件，计算它与其他文件的相似度得分、文本可读性和情感分析得分
+    # 用set集合存储已经计算得到的文本相似度结果
+    similarity_cache = dict()
+    filenames = os.listdir(os.path.join(dir_path, "txt"))
+
+    if use_multiprocess:
+        manager = Manager()
+        shared_dict = manager.dict()
+        args_list = [(file, shared_dict, model) for file in txt_files]
+
+        with Pool(processes=multiprocess_core) as pool:
+            # pool.map(run_token_nlp, args_list)
+            list(tqdm(pool.imap(run_token_nlp, args_list), total=len(args_list)))
+
+        model_result1 = dict(shared_dict)
+    else:
+        for file in tqdm(txt_files):
+            arg_list = (file, model_result1, model)
+            run_token_nlp(arg_list)
+
+    model_result2 = copy.deepcopy(model_result1)
+
+    if use_multiprocess:
+    manager = Manager()
+    shared_dict = manager.dict()
+    args_list = [(file, shared_dict, model) for file in txt_files]
+
+    for i, file1 in tqdm(enumerate(txt_files)):
+        for j, file2 in enumerate(txt_files):
+            similarity_matrix[i][j] = doc2vec_similarity(file1, file2, similarity_cache)
+
+        #计算相似度得分的平均值，作为该文件的文本相似度指标
+        mean_similarity_matrix[i] = np.mean(similarity_matrix[i])
+
+        try:
+            with open(file1, 'r', encoding='utf-8') as f1:
+                text1 = f1.read()
+            tfidf_path = dir_path + "\\npy\\" + filenames[i][:6] + ".txt.npy"
+            word_tfidf = dict(np.load(tfidf_path, allow_pickle=True).tolist())
+            sentiment_matrix[i], readability_matrix[i] = text_score(text1, word_tfidf)
+        except:
+            sentiment_matrix[i], readability_matrix[i] = 0, 0
+
+        print(i, filenames[i][:6])
+            
+        # 检查内存使用情况并输出
+        process = psutil.Process(os.getpid())
+        print(f"Memory used for file {i}: {process.memory_info().rss/1e6} MB")
+
+# 保存结果
+txt_names = os.listdir("...\\data\\txt")
+for i in range(len(txt_names)):
+    txt_names[i] = txt_names[i][:6]
+# 将相似度矩阵、文本可读性和情感分析得分存储在csv文件中
+df = pd.DataFrame(similarity_matrix)
+df.to_csv("...\\data\\indexes\\text_similarity_scores.csv")
+df2 = pd.DataFrame(readability_matrix, columns=["readability_score"], index=txt_names)
+df2.to_csv("...\\data\\indexes\\text_readability_scores.csv")
+df3 = pd.DataFrame(sentiment_matrix, columns=["sentiment_score"], index=txt_names)
+df3.to_csv("...\\data\\indexes\\text_sentiment_scores.csv")
 
